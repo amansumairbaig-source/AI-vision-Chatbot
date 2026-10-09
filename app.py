@@ -115,22 +115,51 @@ def clean_whatsapp_text(text):
 
 
 def send_whatsapp(to_number, user_name, summary):
-    try:
-        content_variables = json.dumps(
-            {"1": user_name, "2": clean_whatsapp_text(summary)},
-            ensure_ascii=False,
-        )
+    if not TWILIO_ACCOUNT_SID or TWILIO_ACCOUNT_SID.startswith("demo-") or not TWILIO_AUTH_TOKEN or TWILIO_AUTH_TOKEN.startswith("demo-"):
+        return False, "Twilio credentials in .streamlit/secrets.toml are still set to demo values. Please add your real TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN."
 
+    # Format phone number cleanly
+    clean_num = to_number.strip().replace(" ", "").replace("-", "")
+    if not clean_num.startswith("+"):
+        clean_num = "+" + clean_num
+    if clean_num.startswith("whatsapp:"):
+        recipient = clean_num
+    else:
+        recipient = f"whatsapp:{clean_num}"
+
+    body_text = f"🥗 *MacroSnap Nutrition Summary for {user_name}*\n\n{summary}"
+
+    # Try Content Template if SID is provided and not demo
+    if TWILIO_CONTENT_SID and not TWILIO_CONTENT_SID.startswith("demo-"):
+        try:
+            content_variables = json.dumps(
+                {"1": user_name, "2": clean_whatsapp_text(summary)},
+                ensure_ascii=False,
+            )
+            message = twilio_client.messages.create(
+                from_=TWILIO_WHATSAPP_FROM,
+                to=recipient,
+                content_sid=TWILIO_CONTENT_SID,
+                content_variables=content_variables,
+            )
+            return True, message.sid
+        except Exception as error:
+            # Fallback to direct text if content template fails
+            pass
+
+    # Direct message fallback
+    try:
         message = twilio_client.messages.create(
             from_=TWILIO_WHATSAPP_FROM,
-            to=f"whatsapp:{to_number}",
-            content_sid=TWILIO_CONTENT_SID,
-            content_variables=content_variables,
+            to=recipient,
+            body=body_text,
         )
-
         return True, message.sid
     except Exception as error:
-        return False, str(error)
+        err_str = str(error)
+        if "not currently eligible" in err_str or "unregistered" in err_str or "21608" in err_str or "63007" in err_str:
+            return False, f"Twilio Sandbox Requirement: Your phone ({clean_num}) must first join your Twilio Sandbox. Open WhatsApp, message +1 415 523 8886 with your sandbox join code (e.g. 'join <word>')."
+        return False, err_str
 
 
 if "onboarded" not in st.session_state:
